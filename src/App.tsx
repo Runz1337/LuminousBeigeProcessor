@@ -1793,7 +1793,7 @@ export default function App(): JSX.Element {
                     Upload PDF
                 </label>
                 <input id="pdf-upload-top" type="file" accept="application/pdf" onChange={handleFileChange} className="hidden" />
-                <h1 className="text-base font-semibold text-gray-800 ml-2">Codex Interactive</h1>
+                <h1 className="text-base font-semibold text-gray-800 ml-2">Spexys</h1>
             </div>
 
             {pdfFile && (
@@ -1943,7 +1943,7 @@ export default function App(): JSX.Element {
             >
                 <div className={`flex items-center justify-center ${sidebarPadding} pt-3 pb-2 border-b border-gray-100`}>
                     {isSidebarExpanded ? (
-                        <h2 className="text-base font-semibold text-gray-800 whitespace-nowrap">Codex Interactive</h2>
+                        <h2 className="text-base font-semibold text-gray-800 whitespace-nowrap">Spexys</h2>
                     ) : (
                         <Menu size={iconSize} className="text-gray-600 cursor-pointer" onClick={() => setIsSidebarExpanded(!isSidebarExpanded)} />
                     )}
@@ -3047,7 +3047,7 @@ export default function App(): JSX.Element {
                                 <div className="mx-auto w-20 h-20 flex items-center justify-center bg-gray-50 rounded-full border-2 border-dashed border-gray-200">
                                     <FileText size={40} className="text-gray-400" />
                                 </div>
-                                <h2 className="mt-4 text-lg font-semibold text-gray-700">Welcome to Codex Interactive</h2>
+                                <h2 className="mt-4 text-lg font-semibold text-gray-700">Welcome to Spexys</h2>
                                 <p className="mt-1.5 text-sm text-gray-500">Upload a PDF to begin your interactive reading session.</p>
                                 {auth && !auth.currentUser && (
                                     <div className="mt-4 p-4 bg-blue-50 border border-blue-100 rounded-lg max-w-md mx-auto">
