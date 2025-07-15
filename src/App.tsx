@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { initializeApp, FirebaseApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, Auth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, getDoc, onSnapshot, addDoc, updateDoc, deleteDoc, query, where, getDocs, Firestore, Unsubscribe } from 'firebase/firestore';
-import { Upload, FileText, ChevronLeft, ChevronRight, Search, Zap, Highlighter, Type, MousePointer, Save, Trash2, ChevronsUpDown, Bot, X, LogIn, LogOut, Eraser, Plus, HelpCircle, ClipboardList, BookOpen, Edit, Flag, CheckCircle, XCircle, NotebookText, Menu, BookMarked, Bell, Clock } from 'lucide-react'; // Added Clock
+import { Upload, FileText, ChevronLeft, ChevronRight, Search, Zap, Highlighter, Type, MousePointer, Save, Trash2, ChevronsUpDown, Bot, X, LogIn, LogOut, Eraser, Plus, HelpCircle, ClipboardList, BookOpen, Edit, Flag, CheckCircle, XCircle, NotebookText, Menu, BookMarked, Bell, Clock } from 'lucide-react';
 
 // --- Type Definitions ---
 interface HighlightRect {
@@ -597,14 +597,18 @@ export default function App(): JSX.Element {
                 }
             };
 
-            window.addEventListener('beforeunload', saveTimeOnUnload);
+            const handleBeforeUnload = () => {
+                saveTimeOnUnload();
+            };
+
+            window.addEventListener('beforeunload', handleBeforeUnload);
             saveTimeOnUnload(); // Also call on component unmount
             
             return () => {
-                window.removeEventListener('beforeunload', saveTimeOnUnload);
+                window.removeEventListener('beforeunload', handleBeforeUnload);
             };
         };
-    }, [db, userId, appId, pdfDoc]); // Re-run when db, userId, or pdfDoc changes
+    }, [db, userId, appId, pdfDoc, currentSessionElapsed]); // Re-run when db, userId, or pdfDoc changes
 
     // --- PDF Rendering Logic ---
     const renderPage = useCallback(async (pageNumber: number, docToRender: PDFDocumentProxy) => {
