@@ -110,8 +110,9 @@ interface PDFPageProxy {
 
 
 // --- Firebase Configuration ---
+// Ensure these are correctly populated from your environment or a secure source
 const firebaseConfig = {   apiKey: "AIzaSyC0nM-Cji-nJezd7bAvZPHwDGs7jWOrEg4",   authDomain: "neon-equinox-337515.firebaseapp.com",   projectId: "neon-equinox-337515",   storageBucket: "neon-equinox-337515.firebasestorage.app",   messagingSenderId: "1055440875899",   appId: "1:1055440875899:web:71f697bed1467f4b704dde",   measurementId: "G-N1NJ0CGXT4" }
-const appId =  'default-codex-app';
+const appId =   'default-codex-app';
 const initialAuthToken = null;
 
 
@@ -530,13 +531,29 @@ export default function App(): JSX.Element {
                         try {
                             const timeDocRef = doc(dbInstance, `artifacts/${appId}/users/${user.uid}/sessionTime`, 'total');
                             const docSnap = await getDoc(timeDocRef);
+                            const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+
                             if (docSnap.exists()) {
-                                setTotalTimeSpent(docSnap.data().totalSeconds || 0);
+                                const data = docSnap.data();
+                                const storedTotalSeconds = data.totalSeconds || 0;
+                                const storedLastSessionDate = data.lastSessionDate;
+
+                                if (storedLastSessionDate !== today) {
+                                    // It's a new day, reset totalSeconds
+                                    await setDoc(timeDocRef, { totalSeconds: 0, lastSessionDate: today }, { merge: true });
+                                    setTotalTimeSpent(0);
+                                    console.log("New day detected. Total time reset.");
+                                } else {
+                                    // Same day, load existing totalSeconds
+                                    setTotalTimeSpent(storedTotalSeconds);
+                                }
                             } else {
+                                // No session time record, create one for today
+                                await setDoc(timeDocRef, { totalSeconds: 0, lastSessionDate: today }, { merge: true });
                                 setTotalTimeSpent(0);
                             }
                         } catch (error) {
-                            console.error("Error loading total time spent on auth ready:", error);
+                            console.error("Error loading/resetting total time spent on auth ready:", error);
                         }
                     } else {
                         try {
@@ -600,7 +617,12 @@ export default function App(): JSX.Element {
                     const timeDocRef = doc(db, `artifacts/${appId}/users/${userId}/sessionTime`, 'total');
                     const docSnap = await getDoc(timeDocRef);
                     const existingTotal = docSnap.exists() ? docSnap.data().totalSeconds : 0;
-                    await setDoc(timeDocRef, { totalSeconds: existingTotal + currentSessionElapsed }, { merge: true });
+                    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+
+                    await setDoc(timeDocRef, { 
+                        totalSeconds: existingTotal + currentSessionElapsed,
+                        lastSessionDate: today // Update last session date
+                    }, { merge: true });
                     console.log(`Saved ${currentSessionElapsed} seconds. New total: ${existingTotal + currentSessionElapsed}`);
                 } catch (error) {
                     console.error("Error saving time:", error);
@@ -1626,7 +1648,12 @@ export default function App(): JSX.Element {
                 const timeDocRef = doc(db, `artifacts/${appId}/users/${userId}/sessionTime`, 'total');
                 const docSnap = await getDoc(timeDocRef);
                 const existingTotal = docSnap.exists() ? docSnap.data().totalSeconds : 0;
-                await setDoc(timeDocRef, { totalSeconds: existingTotal + currentSessionElapsed }, { merge: true });
+                const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+
+                await setDoc(timeDocRef, { 
+                    totalSeconds: existingTotal + currentSessionElapsed,
+                    lastSessionDate: today // Update last session date
+                }, { merge: true });
                 console.log(`Saved ${currentSessionElapsed} seconds on sign out. New total: ${existingTotal + currentSessionElapsed}`);
             } catch (error) {
                 console.error("Error saving time on sign out:", error);
@@ -1663,20 +1690,49 @@ export default function App(): JSX.Element {
             return;
         }
 
-        if (!auth.currentUser.isAnonymous) {
-            setNotification({ message: "Account deletion is only available for anonymous users. Please sign out first if you wish to delete your Google-linked account.", type: "info", id: Date.now() });
-            return;
-        }
-
         setShowLoadingOverlay(true);
         setShowDeleteAccountConfirm(false); // Close confirmation modal
 
         try {
+            // Save current session time before deleting account
+            if (db && userId && currentSessionElapsed > 0 && !isSavingTimeRef.current) {
+                isSavingTimeRef.current = true;
+                try {
+                    const timeDocRef = doc(db, `artifacts/${appId}/users/${userId}/sessionTime`, 'total');
+                    const docSnap = await getDoc(timeDocRef);
+                    const existingTotal = docSnap.exists() ? docSnap.data().totalSeconds : 0;
+                    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+
+                    await setDoc(timeDocRef, { 
+                        totalSeconds: existingTotal + currentSessionElapsed,
+                        lastSessionDate: today // Update last session date
+                    }, { merge: true });
+                    console.log(`Saved ${currentSessionElapsed} seconds on account delete. New total: ${existingTotal + currentSessionElapsed}`);
+                } catch (error) {
+                    console.error("Error saving time on account delete:", error);
+                } finally {
+                    isSavingTimeRef.current = false;
+                }
+            }
+
+            // Sign out the user first if they are not anonymous
+            // This is crucial for Firebase's deleteUser to work if the session is old
+            // However, deleteUser itself might trigger a re-authentication prompt.
+            // If the user is Google-linked, directly deleting might require recent login.
+            // For anonymous users, signOut is not strictly necessary before deleteUser.
+            if (!auth.currentUser.isAnonymous) {
+                await signOut(auth); // Sign out Google user to potentially avoid re-auth prompt for deleteUser
+                setNotification({ message: "Signed out for account deletion.", type: "info", id: Date.now() });
+            }
+
             // Delete user data from Firestore
-            // This is a simplified example. In a real app, you'd need to recursively delete all subcollections.
+            // IMPORTANT: This only deletes the top-level user document.
+            // To recursively delete all subcollections (documents, annotations, mistakes, notes),
+            // you would typically use a Firebase Cloud Function triggered by user deletion.
+            // Client-side recursive deletion is complex and prone to errors/rate limits.
             const userDocRef = doc(db, `artifacts/${appId}/users/${userId}`);
-            await deleteDoc(userDocRef); // This only deletes the user document, not subcollections.
-                                        // For full deletion, you'd need a Cloud Function or more complex client-side logic.
+            await deleteDoc(userDocRef).catch(e => console.warn("Could not delete user's top-level data document, may have subcollections:", e));
+            // Note: Subcollections like 'documents', 'sessionTime' etc. will remain unless explicitly deleted or handled by a Cloud Function.
 
             // Delete the user from Firebase Authentication
             await deleteUser(auth.currentUser);
@@ -1954,73 +2010,71 @@ export default function App(): JSX.Element {
                 </nav>
 
                 <div className={`mt-auto ${sidebarPadding} border-t border-gray-100 py-3`}>
-                    {auth && (
-                        <>
-                            {auth.currentUser ? (
-                                <div className="space-y-2">
-                                    {isSidebarExpanded && auth.currentUser.photoURL && (
-                                        <div className="flex items-center space-x-2 px-2 py-1">
-                                            <img 
-                                                src={auth.currentUser.photoURL} 
-                                                alt="Profile" 
-                                                className="w-6 h-6 rounded-full border border-gray-200"
-                                            />
-                                            <div className="flex-1 min-w-0">
-                                                <p className="text-xs font-medium text-gray-700 truncate">
-                                                    {auth.currentUser.displayName || auth.currentUser.email || 'Anonymous User'}
-                                                </p>
-                                                <p className="text-xs text-gray-500 truncate">
-                                                    {auth.currentUser.isAnonymous ? 'Signed in anonymously' : 'Signed in with Google'}
-                                                </p>
-                                            </div>
-                                        </div>
-                                    )}
-                                    <button
-                                        onClick={handleSignOut}
-                                        className={`flex items-center w-full text-left rounded-md text-gray-700 transition-colors duration-200 ${sidebarPadding} ${isSidebarExpanded ? 'justify-start hover:bg-red-50 border border-red-100' : 'justify-center hover:bg-gray-100'}`}
-                                        style={isSidebarExpanded ? {} : { backgroundColor: 'rgb(240,244,249)' }}
-                                        title="Sign Out"
-                                    >
-                                        <LogOut size={iconSize} className={isSidebarExpanded ? "mr-3 text-red-600" : "text-gray-600"} />
-                                        {isSidebarExpanded && <span className="text-sm font-medium text-red-600">Sign Out</span>}
-                                    </button>
-                                    {isAnonymous && (
-                                        <button
-                                            onClick={() => setShowDeleteAccountConfirm(true)}
-                                            className={`flex items-center w-full text-left rounded-md text-gray-700 transition-colors duration-200 ${sidebarPadding} ${isSidebarExpanded ? 'justify-start hover:bg-red-50 border border-red-100' : 'justify-center hover:bg-gray-100'}`}
-                                            style={isSidebarExpanded ? {} : { backgroundColor: 'rgb(240,244,249)' }}
-                                            title="Delete Anonymous Account"
-                                        >
-                                            <UserX size={iconSize} className={isSidebarExpanded ? "mr-3 text-red-600" : "text-gray-600"} />
-                                            {isSidebarExpanded && <span className="text-sm font-medium text-red-600">Delete Account</span>}
-                                        </button>
-                                    )}
-                                {'}'}
-                                </div>
-                            ) : (
-                                <button
-                                    onClick={handleGoogleSignIn}
-                                    className={`flex items-center w-full text-left rounded-md transition-colors duration-200 ${sidebarPadding} ${isSidebarExpanded ? 'justify-start border border-gray-200 shadow-sm hover:shadow-md' : 'justify-center hover:bg-gray-100'}`}
-                                    style={{ backgroundColor: 'rgb(240,244,249)', color: 'rgb(55, 65, 81)' }}
-                                    title="Sign In with Google"
-                                >
-                                    <div className={`flex items-center ${isSidebarExpanded ? 'mr-3' : ''}`}>
-                                        <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" className="mr-1">
-                                            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                                            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                                            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                                            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                                        </svg>
+                    {/* Always show delete account if user is authenticated (anonymous or not) */}
+                    {auth && auth.currentUser && (
+                        <button
+                            onClick={() => setShowDeleteAccountConfirm(true)}
+                            className={`flex items-center w-full text-left rounded-md text-gray-700 transition-colors duration-200 ${sidebarPadding} ${isSidebarExpanded ? 'justify-start hover:bg-red-50 border border-red-100' : 'justify-center hover:bg-gray-100'}`}
+                            style={isSidebarExpanded ? {} : { backgroundColor: 'rgb(240,244,249)' }}
+                            title="Delete Account"
+                        >
+                            <UserX size={iconSize} className={isSidebarExpanded ? "mr-3 text-red-600" : "text-gray-600"} />
+                            {isSidebarExpanded && <span className="text-sm font-medium text-red-600">Delete Account</span>}
+                        </button>
+                    )}
+
+                    {auth && auth.currentUser && !auth.currentUser.isAnonymous ? (
+                        // User is logged in with Google (or another provider, not anonymous)
+                        <div className="space-y-2">
+                            {isSidebarExpanded && auth.currentUser.photoURL && (
+                                <div className="flex items-center space-x-2 px-2 py-1">
+                                    <img
+                                        src={auth.currentUser.photoURL}
+                                        alt="Profile"
+                                        className="w-6 h-6 rounded-full border border-gray-200"
+                                    />
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-xs font-medium text-gray-700 truncate">
+                                            {auth.currentUser.displayName || auth.currentUser.email || 'Google User'}
+                                        </p>
+                                        <p className="text-xs text-gray-500 truncate">Signed in with Google</p>
                                     </div>
-                                    {isSidebarExpanded && (
-                                        <div className="flex flex-col">
-                                            <span className="text-sm font-medium">Continue with Google</span>
-                                            <span className="text-xs text-gray-500">Optional - sync across devices</span>
-                                        </div>
-                                    )}
-                                </button>
+                                </div>
                             )}
-                        </>
+                            <button
+                                onClick={handleSignOut}
+                                className={`flex items-center w-full text-left rounded-md text-gray-700 transition-colors duration-200 ${sidebarPadding} ${isSidebarExpanded ? 'justify-start hover:bg-red-50 border border-red-100' : 'justify-center hover:bg-gray-100'}`}
+                                style={isSidebarExpanded ? {} : { backgroundColor: 'rgb(240,244,249)' }}
+                                title="Sign Out"
+                            >
+                                <LogOut size={iconSize} className={isSidebarExpanded ? "mr-3 text-red-600" : "text-gray-600"} />
+                                {isSidebarExpanded && <span className="text-sm font-medium text-red-600">Sign Out</span>}
+                            </button>
+                        </div>
+                    ) : (
+                        // User is not logged in, or is logged in anonymously
+                        <button
+                            onClick={handleGoogleSignIn}
+                            className={`flex items-center w-full text-left rounded-md transition-colors duration-200 ${sidebarPadding} ${isSidebarExpanded ? 'justify-start border border-gray-200 shadow-sm hover:shadow-md' : 'justify-center hover:bg-gray-100'}`}
+                            style={{ backgroundColor: 'rgb(240,244,249)', color: 'rgb(55, 65, 81)' }} // Applying specified styles
+                            title="Sign In with Google"
+                        >
+                            <div className={`flex items-center ${isSidebarExpanded ? 'mr-3' : ''}`}>
+                                {/* Google Icon SVG */}
+                                <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" className="mr-1">
+                                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                                </svg>
+                            </div>
+                            {isSidebarExpanded && (
+                                <div className="flex flex-col">
+                                    <span className="text-sm font-medium">Continue with Google</span>
+                                    <span className="text-xs text-gray-500">Optional - sync across devices</span>
+                                </div>
+                            )}
+                        </button>
                     )}
                 </div>
             </div>
@@ -2851,7 +2905,7 @@ export default function App(): JSX.Element {
         );
     };
 
-    const DeleteAccountConfirmation = ({ onClose, onDeleteConfirm }: { onClose: () => void; onDeleteConfirm: () => void; }) => {
+    const DeleteAccountConfirmation = ({ onClose, onDeleteConfirm, isAnonymousUser }: { onClose: () => void; onDeleteConfirm: () => void; isAnonymousUser: boolean; }) => {
         return (
             <div className="fixed inset-0 bg-black/20 z-50 flex items-center justify-center p-4">
                 <div className="bg-white rounded-lg shadow-xl w-full max-w-sm flex flex-col" onClick={e => e.stopPropagation()}>
@@ -2861,11 +2915,13 @@ export default function App(): JSX.Element {
                     </div>
                     <div className="p-4 text-center">
                         <p className="text-gray-700 text-sm mb-4">
-                            Are you sure you want to delete your anonymous account? This action is irreversible and all your data (annotations, mistakes, notes, session time) will be permanently lost.
+                            Are you sure you want to delete your {isAnonymousUser ? 'anonymous' : 'Google-linked'} account? This action is irreversible and all your data (annotations, mistakes, notes, session time) will be permanently lost.
                         </p>
-                        <p className="text-xs text-gray-500 font-medium">
-                            If you wish to save your data, please link your account to Google before deleting.
-                        </p>
+                        {!isAnonymousUser && (
+                            <p className="text-xs text-red-500 font-medium mt-2">
+                                For Google-linked accounts, you might need to re-authenticate (sign out and sign in again) before deletion can succeed.
+                            </p>
+                        )}
                     </div>
                     <div className="p-3 bg-gray-50 border-t border-gray-100 flex justify-end space-x-2">
                         <button onClick={onClose} className="px-3 py-1.5 rounded-full text-sm font-medium text-gray-700 bg-white border border-gray-200 hover:bg-gray-100">Cancel</button>
@@ -3123,6 +3179,7 @@ export default function App(): JSX.Element {
                         <DeleteAccountConfirmation
                             onClose={() => setShowDeleteAccountConfirm(false)}
                             onDeleteConfirm={handleDeleteAccount}
+                            isAnonymousUser={isAnonymous} // Pass the anonymous status
                         />
                     )}
                 </>
