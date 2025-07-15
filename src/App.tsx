@@ -2896,7 +2896,7 @@ export default function App(): JSX.Element {
 
         return (
             <div
-                className="fixed bottom-4 left-4 p-2 rounded-lg shadow-md flex items-center space-x-2 z-40"
+                className="fixed bottom-4 right-4 p-2 rounded-lg shadow-md flex items-center space-x-2 z-40"
                 style={{ backgroundColor: 'rgb(240,244,249)', color: 'rgb(55, 65, 81)' }}
             >
                 <Clock size={16} />
