@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { initializeApp, FirebaseApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, Auth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, getDoc, onSnapshot, addDoc, updateDoc, deleteDoc, query, where, getDocs, Firestore, Unsubscribe } from 'firebase/firestore';
-import { Upload, FileText, ChevronLeft, ChevronRight, Search, Zap, Highlighter, Type, MousePointer, Save, Trash2, ChevronsUpDown, Bot, X, LogIn, LogOut, Eraser, Plus, HelpCircle, ClipboardList, BookOpen, Edit, Flag, CheckCircle, XCircle, NotebookText, Menu, BookMarked, Bell, Clock } from 'lucide-react';
+import { Upload, FileText, ChevronLeft, ChevronRight, Search, Zap, Highlighter, Type, MousePointer, Save, Trash2, ChevronsUpDown, Bot, X, LogIn, LogOut, Eraser, Plus, HelpCircle, ClipboardList, BookOpen, Edit, Flag, CheckCircle, XCircle, NotebookText, Menu, BookMarked, Bell, Clock } from 'lucide-react'; // Added Clock
 
 // --- Type Definitions ---
 interface HighlightRect {
@@ -110,7 +110,7 @@ interface PDFPageProxy {
 
 
 // --- Firebase Configuration ---
-const firebaseConfig = {   apiKey: "AIzaSyC0nM-Cji-nJezd7bAvZPHwDGs7jWOrEg4",   authDomain: "neon-equinox-337515.firebaseapp.com",   projectId: "neon-equinox-337515",   storageBucket: "neon-equinox-337515.firebasestorage.app",   messagingSenderId: "1055440875899",   appId: "1:1055440875899:web:71f697bed1467f4b704dde",   measurementId: "G-N1NJ0CGXT4" };
+const firebaseConfig = process.env.REACT_APP_FIREBASE_CONFIG
 const appId =   'default-codex-app';
 const initialAuthToken =   null;
 
@@ -450,6 +450,7 @@ export default function App(): JSX.Element {
     const [activeAnnotation, setActiveAnnotation] = useState<Annotation | null>(null);
     const [selectedTool, setSelectedTool] = useState<'select' | 'highlight' | 'erase' | 'note'>('select');
     const [highlightColor, setHighlightColor] = useState<string>('rgba(255, 255, 0, 0.2)'); // Default yellow with lower opacity
+    const [showColorPickerPopup, setShowColorPickerPopup] = useState<boolean>(false); // NEW: State for color picker popup
 
     // Context menu and text selection states
     const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -488,9 +489,6 @@ export default function App(): JSX.Element {
     const [notification, setNotification] = useState<Notification | null>(null);
     const notificationTimeoutRef = useRef<number | null>(null);
 
-    // Tool Palette visibility state
-    const [isToolPaletteOpen, setIsToolPaletteOpen] = useState(false);
-
     // Sidebar state
     const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
 
@@ -509,7 +507,6 @@ export default function App(): JSX.Element {
     const annotationsUnsubscribe = useRef<Unsubscribe | null>(null);
     const mistakesUnsubscribe = useRef<Unsubscribe | null>(null);
     const shortNotesUnsubscribe = useRef<Unsubscribe | null>(null);
-    const toolPaletteRef = useRef<HTMLDivElement>(null);
 
 
     // --- Firebase Initialization and Auth ---
@@ -526,6 +523,18 @@ export default function App(): JSX.Element {
                     if (user) {
                         setUserId(user.uid);
                         setIsAuthReady(true);
+                        // Load total time spent once authentication is ready
+                        try {
+                            const timeDocRef = doc(dbInstance, `artifacts/${appId}/users/${user.uid}/sessionTime`, 'total');
+                            const docSnap = await getDoc(timeDocRef);
+                            if (docSnap.exists()) {
+                                setTotalTimeSpent(docSnap.data().totalSeconds || 0);
+                            } else {
+                                setTotalTimeSpent(0);
+                            }
+                        } catch (error) {
+                            console.error("Error loading total time spent on auth ready:", error);
+                        }
                     } else {
                         try {
                             if (initialAuthToken) {
@@ -549,39 +558,28 @@ export default function App(): JSX.Element {
 
     // --- Timer Logic (NEW) ---
     useEffect(() => {
-        if (!db || !userId) return;
+        // Start timer only when PDF is loaded and DB/user are ready
+        if (db && userId && pdfDoc) {
+            setSessionStartTime(Date.now()); // Reset start time for the new session
+            setCurrentSessionElapsed(0); // Reset current session elapsed time
 
-        // Function to load time spent
-        const loadTimeSpent = async () => {
-            try {
-                const timeDocRef = doc(db, `artifacts/${appId}/users/${userId}/sessionTime`, 'total');
-                const docSnap = await getDoc(timeDocRef);
-                if (docSnap.exists()) {
-                    setTotalTimeSpent(docSnap.data().totalSeconds || 0);
-                } else {
-                    setTotalTimeSpent(0);
-                }
-            } catch (error) {
-                console.error("Error loading total time spent:", error);
+            timerIntervalRef.current = window.setInterval(() => {
+                setCurrentSessionElapsed(prev => prev + 1);
+            }, 1000);
+        } else {
+            // Clear timer if PDF is not loaded or user/db not ready
+            if (timerIntervalRef.current) {
+                clearInterval(timerIntervalRef.current);
+                timerIntervalRef.current = null;
             }
-        };
+        }
 
-        loadTimeSpent();
-
-        // Start the timer
-        setSessionStartTime(Date.now()); // Reset start time for the new session
-        setCurrentSessionElapsed(0); // Reset current session elapsed time
-
-        timerIntervalRef.current = window.setInterval(() => {
-            setCurrentSessionElapsed(prev => prev + 1);
-        }, 1000);
-
-        // Cleanup function for timer and saving on unmount
+        // Cleanup function for timer and saving on unmount/pdfDoc change
         return () => {
             if (timerIntervalRef.current) {
                 clearInterval(timerIntervalRef.current);
             }
-            // Save time when component unmounts or userId changes
+            // Save time when component unmounts or pdfDoc/userId changes
             const saveTimeOnUnload = async () => {
                 if (db && userId && currentSessionElapsed > 0 && !isSavingTimeRef.current) {
                     isSavingTimeRef.current = true; // Set flag to prevent multiple saves
@@ -599,12 +597,14 @@ export default function App(): JSX.Element {
                 }
             };
 
-            // Add event listener for beforeunload to save time when tab/browser closes
             window.addEventListener('beforeunload', saveTimeOnUnload);
-            
-            saveTimeOnUnload(); // Also call on component unmount
+
+            return () => {
+                window.removeEventListener('beforeunload', saveTimeOnUnload);
+                saveTimeOnUnload(); // Also call on component unmount
+            };
         };
-    }, [db, userId, appId]); // Re-run when db or userId changes
+    }, [db, userId, appId, pdfDoc]); // Re-run when db, userId, or pdfDoc changes
 
     // --- PDF Rendering Logic ---
     const renderPage = useCallback(async (pageNumber: number, docToRender: PDFDocumentProxy) => {
@@ -655,11 +655,13 @@ export default function App(): JSX.Element {
     // --- Load PDF and Annotations/Mistakes/ShortNotes ---
     useEffect(() => {
         if (pdfFile && db && userId && pdfJsStatus === 'ready') {
+            setShowLoadingOverlay(true); // Show loading overlay when file is selected
             const reader = new FileReader();
             reader.onload = async (e: ProgressEvent<FileReader>) => {
                 const arrayBuffer = e.target?.result as ArrayBuffer;
                 if (!arrayBuffer) {
                     console.error("Failed to read file as ArrayBuffer.");
+                    setShowLoadingOverlay(false); // Hide on error
                     return;
                 }
                 const pdfData = new Uint8Array(arrayBuffer);
@@ -706,14 +708,17 @@ export default function App(): JSX.Element {
                             const loadedShortNotes: ShortNoteEntry[] = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ShortNoteEntry));
                             setShortNotes(loadedShortNotes);
                         });
+                        setShowLoadingOverlay(false); // Hide on success
 
                     } catch (error) {
                         console.error("Error loading PDF document:", error);
                         console.error("Failed to load PDF. The file might be corrupted or protected.");
                         setPdfFile(null);
+                        setShowLoadingOverlay(false); // Hide on error
                     }
                 } else {
                     console.error("pdf.js is not loaded, though status was ready.");
+                    setShowLoadingOverlay(false); // Hide on error
                 }
             };
             reader.readAsArrayBuffer(pdfFile);
@@ -757,6 +762,8 @@ export default function App(): JSX.Element {
             setCurrentQuizQuestionIndex(0);
             setShortNotes([]);
             setShowShortNotesUI(false);
+            // Reset pdfDoc to null to ensure timer stops if a new file is chosen before the old one finishes loading
+            setPdfDoc(null);
         } else {
             console.error('Please select a PDF file.');
             setPdfFile(null);
@@ -902,7 +909,7 @@ export default function App(): JSX.Element {
         }
         try {
             const mistakesCol = collection(db, `artifacts/${appId}/users/${userId}/documents/${pdfFile.name}/mistakes`);
-            if ('id' in mistake && mistake.id) {
+            if (mistake.id) {
                 const mistakeRef = doc(db, `artifacts/${appId}/users/${userId}/documents/${pdfFile.name}/mistakes`, mistake.id);
                 await setDoc(mistakeRef, mistake, { merge: true });
                 setNotification({ message: "Mistake updated successfully!", type: "success", id: Date.now() });
@@ -1407,8 +1414,7 @@ export default function App(): JSX.Element {
         }
         promptForLLM += ` Text: "${textToProcess}"`;
 
-        const pollinationsBaseUrl = `https://text.pollinations.ai/`;
-        const apiUrl = `${pollinationsBaseUrl}${encodeURIComponent(promptForLLM)}?model=${aiModel}&json=true`;
+        const apiUrl = `${pollinaionsBaseUrl}${encodeURIComponent(promptForLLM)}?model=${aiModel}&json=true`;
 
         setAiResponse(prev => ({
             ...prev,
@@ -1562,7 +1568,7 @@ export default function App(): JSX.Element {
             setNotification({ message: "Signed in with Google successfully!", type: "success", id: Date.now() });
         } catch (error) {
             console.error("Google Sign-In failed:", error);
-            setNotification({ message: `Google Sign-In failed: ${error instanceof Error ? error.message : 'Unknown error'}`, type: "error", id: Date.now() });
+            setNotification({ message: `Google Sign-In failed: ${error.message}`, type: "error", id: Date.now() });
         }
     };
 
@@ -1604,7 +1610,7 @@ export default function App(): JSX.Element {
             setNotification({ message: "Signed out successfully!", type: "success", id: Date.now() });
         } catch (error) {
             console.error("Sign out failed:", error);
-            setNotification({ message: `Sign out failed: ${error instanceof Error ? error.message : 'Unknown error'}`, type: "error", id: Date.now() });
+            setNotification({ message: `Sign out failed: ${error.message}`, type: "error", id: Date.now() });
         }
     };
 
@@ -1652,7 +1658,45 @@ export default function App(): JSX.Element {
                 </div>
             )}
 
+            {/* Tools and AI Actions */}
             <div className="flex items-center space-x-1">
+                {/* Tool Buttons */}
+                {[
+                    { id: 'select', icon: MousePointer, label: 'Select Tool' },
+                    { id: 'highlight', icon: Highlighter, label: 'Highlight Tool' },
+                    { id: 'note', icon: Plus, label: 'Add Note (select text)' },
+                    { id: 'erase', icon: Eraser, label: 'Erase Tool' }
+                ].map(tool => (
+                    <button key={tool.id} onClick={() => {
+                        setSelectedTool(tool.id as 'select' | 'highlight' | 'erase' | 'note');
+                        if (tool.id !== 'highlight') { // Close color picker if another tool is selected
+                            setShowColorPickerPopup(false);
+                        }
+                    }} className={`p-2 rounded-full ${selectedTool === tool.id ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100 text-gray-600'}`} title={tool.label}>
+                        <tool.icon size={16} />
+                    </button>
+                ))}
+                {selectedTool === 'highlight' && (
+                    <div className="relative">
+                        <button
+                            onClick={() => setShowColorPickerPopup(prev => !prev)}
+                            className="p-2 rounded-full bg-white border border-gray-200 hover:bg-gray-100 shadow-sm"
+                            title="Choose Highlight Color"
+                        >
+                            <div className="w-4 h-4 rounded-full border border-gray-300" style={{ backgroundColor: highlightColor }}></div>
+                        </button>
+                        {showColorPickerPopup && (
+                            <div className="absolute top-full right-0 mt-2 z-50"> {/* Position the picker relative to its button */}
+                                <ColorPicker
+                                    color={highlightColor}
+                                    onChange={setHighlightColor}
+                                />
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* AI Model Select */}
                 <div className="relative">
                     <select
                         value={aiModel}
@@ -1733,50 +1777,7 @@ export default function App(): JSX.Element {
         </div>
     );
 
-    const ToolPalette = (): JSX.Element => {
-        const transformValue = isToolPaletteOpen ? 'translateX(0)' : 'translateX(-100%)';
-
-        return (
-            <>
-                {!isToolPaletteOpen && (
-                    <div
-                        className="fixed top-16 left-0 h-[calc(100vh-64px)] w-4 z-30"
-                        onMouseEnter={() => setIsToolPaletteOpen(true)}
-                        onMouseLeave={() => setIsToolPaletteOpen(false)}
-                    >
-                        <div className="absolute top-1/2 -translate-y-1/2 right-0 h-8 w-4 bg-gray-200 rounded-r-md flex items-center justify-center cursor-pointer">
-                            <ChevronRight size={12} strokeWidth={1} className="text-gray-500 opacity-70" />
-                        </div>
-                    </div>
-                )}
-
-                <div
-                    ref={toolPaletteRef}
-                    className="fixed top-16 left-0 bg-white shadow-md rounded-r-lg p-1.5 flex flex-col items-center space-y-1 z-30 border border-gray-100 transition-transform duration-300 ease-in-out"
-                    style={{ transform: transformValue }}
-                    onMouseEnter={() => setIsToolPaletteOpen(true)}
-                    onMouseLeave={() => setIsToolPaletteOpen(false)}
-                >
-                    {[
-                        { id: 'select', icon: MousePointer, label: 'Select Tool' },
-                        { id: 'highlight', icon: Highlighter, label: 'Highlight Tool' },
-                        { id: 'note', icon: Plus, label: 'Add Note (select text)' },
-                        { id: 'erase', icon: Eraser, label: 'Erase Tool' }
-                    ].map(tool => (
-                        <button key={tool.id} onClick={() => setSelectedTool(tool.id as 'select' | 'highlight' | 'erase' | 'note')} className={`p-2 rounded-full ${selectedTool === tool.id ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100 text-gray-600'}`} title={tool.label}>
-                            <tool.icon size={16} />
-                        </button>
-                    ))}
-                    {selectedTool === 'highlight' && (
-                        <ColorPicker
-                            color={highlightColor}
-                            onChange={setHighlightColor}
-                        />
-                    )}
-                </div>
-            </>
-        );
-    };
+    // ToolPalette component removed as its functionality is moved to TopBar
 
     const Sidebar = (): JSX.Element => {
         const sidebarWidth = isSidebarExpanded ? '256px' : '64px';
@@ -1794,13 +1795,15 @@ export default function App(): JSX.Element {
                     {isSidebarExpanded ? (
                         <h2 className="text-base font-semibold text-gray-800 whitespace-nowrap">Codex Interactive</h2>
                     ) : (
-                        <Menu size={iconSize} className="text-gray-600 cursor-pointer" onClick={() => setIsSidebarExpanded(!isSidebarExpanded)} />
+                        <Menu size={iconSize} className="text-gray-600 cursor-pointer" onClick={() => setIsSidebarExpanded(!isSidebarExpanded)} title="Expand Menu" />
                     )}
                 </div>
 
                 <nav className="flex-grow flex flex-col space-y-1 mt-2 overflow-y-auto custom-scrollbar">
                     <button
                         onClick={() => {
+                            setShowMistakeBook(false); // Close other modals
+                            setShowShortNotesUI(false); // Close other modals
                             setIsSidebarExpanded(true);
                         }}
                         className={`flex items-center w-full text-left rounded-md hover:bg-gray-100 text-gray-700 ${sidebarPadding} ${isSidebarExpanded ? 'justify-start' : 'justify-center'}`}
@@ -1813,6 +1816,7 @@ export default function App(): JSX.Element {
                     <button
                         onClick={() => {
                             setShowMistakeBook(true);
+                            setShowShortNotesUI(false); // Close other modals
                             setIsSidebarExpanded(true);
                         }}
                         disabled={!pdfFile}
@@ -1826,6 +1830,7 @@ export default function App(): JSX.Element {
                     <button
                         onClick={() => {
                             setShowShortNotesUI(true);
+                            setShowMistakeBook(false); // Close other modals
                             setIsSidebarExpanded(true);
                         }}
                         disabled={!pdfFile}
@@ -1965,7 +1970,7 @@ export default function App(): JSX.Element {
                 setIsDragging(true);
                 setDragOffset({
                     x: e.clientX - rect.left,
-                    y: e.clientY - rect.top,
+                    y: e.clientY - rect.y, // Changed to clientY - rect.y for correct vertical offset
                 });
             }
         };
@@ -2173,10 +2178,10 @@ export default function App(): JSX.Element {
                                     onClick={() => setCurrentQuestionIndex(idx)}
                                     className={`w-6 h-6 rounded-full text-xs font-semibold flex items-center justify-center
                                         ${currentQuestionIndex === idx ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}
-                                        ${userAnswers[q.no] !== undefined && userAnswers[q.no] !== null ? 'border-2 border-green-500' : ''}
+                                        ${userAnswers[q.no] !== undefined && userAnswers[parseInt(q.no)] !== null ? 'border-2 border-green-500' : ''}
                                         ${markedForReview.has(q.no) ? 'border-2 border-orange-500' : ''}
                                     `}
-                                    title={`Question ${q.no} ${userAnswers[q.no] !== undefined && userAnswers[q.no] !== null ? '(Attempted)' : ''} ${markedForReview.has(q.no) ? '(Marked)' : ''}`}
+                                    title={`Question ${q.no} ${userAnswers[parseInt(q.no)] !== undefined && userAnswers[parseInt(q.no)] !== null ? '(Attempted)' : ''} ${markedForReview.has(q.no) ? '(Marked)' : ''}`}
                                 >
                                     {q.no}
                                 </button>
@@ -2707,8 +2712,6 @@ export default function App(): JSX.Element {
         );
     };
 
-    
-
     return (
         <div className="h-screen w-screen bg-gray-100 flex font-sans antialiased">
             <style>{`
@@ -2828,7 +2831,7 @@ export default function App(): JSX.Element {
                             </div>
                         )}
                     </main>
-                    <ToolPalette />
+                    {/* ToolPalette component removed */}
                     <NoteEditor />
                     <ContextMenuComponent />
                     <AiResponseWindow />
@@ -2902,7 +2905,7 @@ export default function App(): JSX.Element {
                     <HighlightHelpModal onClose={() => setShowHelpModal(false)} />
                     <LoadingOverlay />
                     <NotificationWidget />
-                    {db && userId && <SessionTimer />} {/* Render timer only if Firebase is ready and user is authenticated */}
+                    {db && userId && <SessionTimer />}
                 </>
             )}
         </div>
