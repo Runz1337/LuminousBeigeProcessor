@@ -2,8 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { initializeApp, FirebaseApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, Auth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, getDoc, onSnapshot, addDoc, updateDoc, deleteDoc, query, where, getDocs, Firestore, Unsubscribe } from 'firebase/firestore';
-import { Upload, FileText, ChevronLeft, ChevronRight, Search, Zap, Highlighter, Type, MousePointer, Save, Trash2, ChevronsUpDown, Bot, X, LogIn, LogOut, Eraser, Plus, HelpCircle, ClipboardList, BookOpen, Edit, Flag, CheckCircle, XCircle, NotebookText, Menu, BookMarked, Bell } from 'lucide-react';
-import { FaRegClock } from 'react-icons/fa';
+import { Upload, FileText, ChevronLeft, ChevronRight, Search, Zap, Highlighter, Type, MousePointer, Save, Trash2, ChevronsUpDown, Bot, X, LogIn, LogOut, Eraser, Plus, HelpCircle, ClipboardList, BookOpen, Edit, Flag, CheckCircle, XCircle, NotebookText, Menu, BookMarked, Bell, Clock } from 'lucide-react';
 
 // --- Type Definitions ---
 interface HighlightRect {
@@ -602,11 +601,8 @@ export default function App(): JSX.Element {
 
             // Add event listener for beforeunload to save time when tab/browser closes
             window.addEventListener('beforeunload', saveTimeOnUnload);
-
-            return () => {
-                window.removeEventListener('beforeunload', saveTimeOnUnload);
-                saveTimeOnUnload(); // Also call on component unmount
-            };
+            
+            saveTimeOnUnload(); // Also call on component unmount
         };
     }, [db, userId, appId]); // Re-run when db or userId changes
 
@@ -906,7 +902,7 @@ export default function App(): JSX.Element {
         }
         try {
             const mistakesCol = collection(db, `artifacts/${appId}/users/${userId}/documents/${pdfFile.name}/mistakes`);
-            if (mistake.id) {
+            if ('id' in mistake && mistake.id) {
                 const mistakeRef = doc(db, `artifacts/${appId}/users/${userId}/documents/${pdfFile.name}/mistakes`, mistake.id);
                 await setDoc(mistakeRef, mistake, { merge: true });
                 setNotification({ message: "Mistake updated successfully!", type: "success", id: Date.now() });
@@ -1411,7 +1407,8 @@ export default function App(): JSX.Element {
         }
         promptForLLM += ` Text: "${textToProcess}"`;
 
-        const apiUrl = `${pollinaionsBaseUrl}${encodeURIComponent(promptForLLM)}?model=${aiModel}&json=true`;
+        const pollinationsBaseUrl = `https://text.pollinations.ai/`;
+        const apiUrl = `${pollinationsBaseUrl}${encodeURIComponent(promptForLLM)}?model=${aiModel}&json=true`;
 
         setAiResponse(prev => ({
             ...prev,
@@ -1565,7 +1562,7 @@ export default function App(): JSX.Element {
             setNotification({ message: "Signed in with Google successfully!", type: "success", id: Date.now() });
         } catch (error) {
             console.error("Google Sign-In failed:", error);
-            setNotification({ message: `Google Sign-In failed: ${error.message}`, type: "error", id: Date.now() });
+            setNotification({ message: `Google Sign-In failed: ${error instanceof Error ? error.message : 'Unknown error'}`, type: "error", id: Date.now() });
         }
     };
 
@@ -1607,7 +1604,7 @@ export default function App(): JSX.Element {
             setNotification({ message: "Signed out successfully!", type: "success", id: Date.now() });
         } catch (error) {
             console.error("Sign out failed:", error);
-            setNotification({ message: `Sign out failed: ${error.message}`, type: "error", id: Date.now() });
+            setNotification({ message: `Sign out failed: ${error instanceof Error ? error.message : 'Unknown error'}`, type: "error", id: Date.now() });
         }
     };
 
@@ -1797,7 +1794,7 @@ export default function App(): JSX.Element {
                     {isSidebarExpanded ? (
                         <h2 className="text-base font-semibold text-gray-800 whitespace-nowrap">Codex Interactive</h2>
                     ) : (
-                        <Menu size={iconSize} className="text-gray-600 cursor-pointer" onClick={() => setIsSidebarExpanded(!isSidebarExpanded)} title="Expand Menu" />
+                        <Menu size={iconSize} className="text-gray-600 cursor-pointer" onClick={() => setIsSidebarExpanded(!isSidebarExpanded)} />
                     )}
                 </div>
 
@@ -2176,10 +2173,10 @@ export default function App(): JSX.Element {
                                     onClick={() => setCurrentQuestionIndex(idx)}
                                     className={`w-6 h-6 rounded-full text-xs font-semibold flex items-center justify-center
                                         ${currentQuestionIndex === idx ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}
-                                        ${userAnswers[q.no] !== undefined && userAnswers[parseInt(q.no)] !== null ? 'border-2 border-green-500' : ''}
+                                        ${userAnswers[q.no] !== undefined && userAnswers[q.no] !== null ? 'border-2 border-green-500' : ''}
                                         ${markedForReview.has(q.no) ? 'border-2 border-orange-500' : ''}
                                     `}
-                                    title={`Question ${q.no} ${userAnswers[parseInt(q.no)] !== undefined && userAnswers[parseInt(q.no)] !== null ? '(Attempted)' : ''} ${markedForReview.has(q.no) ? '(Marked)' : ''}`}
+                                    title={`Question ${q.no} ${userAnswers[q.no] !== undefined && userAnswers[q.no] !== null ? '(Attempted)' : ''} ${markedForReview.has(q.no) ? '(Marked)' : ''}`}
                                 >
                                     {q.no}
                                 </button>
@@ -2704,14 +2701,13 @@ export default function App(): JSX.Element {
                 className="fixed bottom-4 left-4 p-2 rounded-lg shadow-md flex items-center space-x-2 z-40"
                 style={{ backgroundColor: 'rgb(240,244,249)', color: 'rgb(55, 65, 81)' }}
             >
-                <FaRegClock size={16} /> {/* Using a generic clock icon, assuming it's available or can be replaced */}
+                <Clock size={16} />
                 <span className="text-sm font-semibold">Time Spent: {formatTime(displayTime)}</span>
             </div>
         );
     };
 
-    // Add Clock icon to imports
-    // import { Upload, FileText, ChevronLeft, ChevronRight, Search, Zap, Highlighter, Type, MousePointer, Save, Trash2, ChevronsUpDown, Bot, X, LogIn, LogOut, Eraser, Plus, HelpCircle, ClipboardList, BookOpen, Edit, Flag, CheckCircle, XCircle, NotebookText, Menu, BookMarked, Bell, Clock } from 'lucide-react'; // Added Clock
+    
 
     return (
         <div className="h-screen w-screen bg-gray-100 flex font-sans antialiased">
