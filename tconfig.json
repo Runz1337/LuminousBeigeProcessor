@@ -20,8 +20,7 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "sourceMap": true,
-    "outDir": "./dist",
-    "types": ["node"] // IMPORTANT: This tells TypeScript to include Node.js types
+    "outDir": "./dist"
   },
   "include": [
     "src",
