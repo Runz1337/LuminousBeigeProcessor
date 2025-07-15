@@ -460,7 +460,7 @@ export default function App(): JSX.Element {
 
     // AI response window states
     const [aiResponse, setAiResponse] = useState<AIResponseState>({ visible: false, content: '', isLoading: false, position: { x: 200, y: 200 }, size: { width: 400, height: 300 }, chatHistory: [], currentAiAction: null });
-    const [aiModel, setAiModel] = useState<string>('mistral'); // Variable for AI model
+    const [aiModel, setAiModel] = useState<string>('llamascout'); // Variable for AI model
 
     // Quiz states
     const [quizQuestions, setQuizQuestions] = useState<Question[]>([]);
