@@ -579,6 +579,7 @@ export default function App(): JSX.Element {
             if (timerIntervalRef.current) {
                 clearInterval(timerIntervalRef.current);
             }
+            
             // Save time when component unmounts or pdfDoc/userId changes
             const saveTimeOnUnload = async () => {
                 if (db && userId && currentSessionElapsed > 0 && !isSavingTimeRef.current) {
@@ -604,9 +605,11 @@ export default function App(): JSX.Element {
             window.addEventListener('beforeunload', handleBeforeUnload);
             saveTimeOnUnload(); // Also call on component unmount
             
-            return () => {
+            // Return cleanup function that removes event listener
+            const cleanup = () => {
                 window.removeEventListener('beforeunload', handleBeforeUnload);
             };
+            cleanup();
         };
     }, [db, userId, appId, pdfDoc, currentSessionElapsed]); // Re-run when db, userId, or pdfDoc changes
 
@@ -1867,22 +1870,55 @@ export default function App(): JSX.Element {
                     {auth && (
                         <>
                             {auth.currentUser ? (
-                                <button
-                                    onClick={handleSignOut}
-                                    className={`flex items-center w-full text-left rounded-md hover:bg-gray-100 text-gray-700 ${sidebarPadding} ${isSidebarExpanded ? 'justify-start' : 'justify-center'}`}
-                                    title="Sign Out"
-                                >
-                                    <LogOut size={iconSize} className={isSidebarExpanded ? "mr-3" : ""} />
-                                    {isSidebarExpanded && <span className="text-sm font-medium whitespace-nowrap">Sign Out</span>}
-                                </button>
+                                <div className="space-y-2">
+                                    {isSidebarExpanded && auth.currentUser.photoURL && (
+                                        <div className="flex items-center space-x-2 px-2 py-1">
+                                            <img 
+                                                src={auth.currentUser.photoURL} 
+                                                alt="Profile" 
+                                                className="w-6 h-6 rounded-full border border-gray-200"
+                                            />
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-xs font-medium text-gray-700 truncate">
+                                                    {auth.currentUser.displayName || auth.currentUser.email}
+                                                </p>
+                                                <p className="text-xs text-gray-500 truncate">
+                                                    Signed in
+                                                </p>
+                                            </div>
+                                        </div>
+                                    )}
+                                    <button
+                                        onClick={handleSignOut}
+                                        className={`flex items-center w-full text-left rounded-md text-gray-700 transition-colors duration-200 ${sidebarPadding} ${isSidebarExpanded ? 'justify-start hover:bg-red-50 border border-red-100' : 'justify-center hover:bg-gray-100'}`}
+                                        style={isSidebarExpanded ? {} : { backgroundColor: 'rgb(240,244,249)' }}
+                                        title="Sign Out"
+                                    >
+                                        <LogOut size={iconSize} className={isSidebarExpanded ? "mr-3 text-red-600" : "text-gray-600"} />
+                                        {isSidebarExpanded && <span className="text-sm font-medium text-red-600">Sign Out</span>}
+                                    </button>
+                                </div>
                             ) : (
                                 <button
                                     onClick={handleGoogleSignIn}
-                                    className={`flex items-center w-full text-left rounded-md hover:bg-gray-100 text-gray-700 ${sidebarPadding} ${isSidebarExpanded ? 'justify-start' : 'justify-center'}`}
+                                    className={`flex items-center w-full text-left rounded-md transition-colors duration-200 ${sidebarPadding} ${isSidebarExpanded ? 'justify-start border border-gray-200 shadow-sm hover:shadow-md' : 'justify-center hover:bg-gray-100'}`}
+                                    style={{ backgroundColor: 'rgb(240,244,249)', color: 'rgb(55, 65, 81)' }}
                                     title="Sign In with Google"
                                 >
-                                    <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google icon" className={isSidebarExpanded ? "w-4 h-4 mr-3" : "w-4 h-4"} />
-                                    {isSidebarExpanded && <span className="text-sm font-medium whitespace-nowrap">Sign In</span>}
+                                    <div className={`flex items-center ${isSidebarExpanded ? 'mr-3' : ''}`}>
+                                        <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" className="mr-1">
+                                            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                                            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                                            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                                            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                                        </svg>
+                                    </div>
+                                    {isSidebarExpanded && (
+                                        <div className="flex flex-col">
+                                            <span className="text-sm font-medium">Continue with Google</span>
+                                            <span className="text-xs text-gray-500">Optional - sync across devices</span>
+                                        </div>
+                                    )}
                                 </button>
                             )}
                         </>
@@ -2795,6 +2831,37 @@ export default function App(): JSX.Element {
                     <Sidebar />
                     <main className={`flex-1 bg-gray-100 h-full overflow-auto flex items-start justify-center p-6 pt-16 transition-all duration-300 ease-in-out`}
                         style={{ marginLeft: isSidebarExpanded ? '256px' : '64px' }}>
+                        {/* Optional Authentication Banner */}
+                        {auth && !auth.currentUser && (
+                            <div className="fixed top-14 left-1/2 transform -translate-x-1/2 z-30">
+                                <div 
+                                    className="px-4 py-2 rounded-lg shadow-lg border border-blue-100 text-blue-800 text-sm font-medium flex items-center space-x-2"
+                                    style={{ backgroundColor: 'rgb(240,244,249)' }}
+                                >
+                                    <svg width="16" height="16" viewBox="0 0 24 24" className="text-blue-600">
+                                        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                                    </svg>
+                                    <span>Sign in with Google to sync your progress across devices</span>
+                                    <button 
+                                        onClick={handleGoogleSignIn}
+                                        className="ml-2 px-2 py-1 bg-blue-600 text-white text-xs rounded-md hover:bg-blue-700 transition-colors duration-200"
+                                    >
+                                        Sign In
+                                    </button>
+                                    <button 
+                                        onClick={() => setNotification({ message: "You can continue using the app without signing in. Your data will be stored locally.", type: "info", id: Date.now() })}
+                                        className="ml-1 text-blue-600 hover:text-blue-800"
+                                        title="Dismiss"
+                                    >
+                                        <X size={14} />
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                        
                         {!pdfFile ? (
                             <div className="text-center mt-16">
                                 <div className="mx-auto w-20 h-20 flex items-center justify-center bg-gray-50 rounded-full border-2 border-dashed border-gray-200">
@@ -2802,6 +2869,24 @@ export default function App(): JSX.Element {
                                 </div>
                                 <h2 className="mt-4 text-lg font-semibold text-gray-700">Welcome to Codex Interactive</h2>
                                 <p className="mt-1.5 text-sm text-gray-500">Upload a PDF to begin your interactive reading session.</p>
+                                {auth && !auth.currentUser && (
+                                    <div className="mt-4 p-4 bg-blue-50 border border-blue-100 rounded-lg max-w-md mx-auto">
+                                        <p className="text-sm text-blue-700 mb-2">💡 <strong>Tip:</strong> Sign in with Google to save your annotations and sync across devices</p>
+                                        <button
+                                            onClick={handleGoogleSignIn}
+                                            className="inline-flex items-center px-3 py-2 rounded-md text-sm font-medium border border-gray-200 shadow-sm hover:shadow-md transition-all duration-200"
+                                            style={{ backgroundColor: 'rgb(240,244,249)', color: 'rgb(55, 65, 81)' }}
+                                        >
+                                            <svg width="18" height="18" viewBox="0 0 24 24" className="mr-2">
+                                                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                                                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                                                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                                                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                                            </svg>
+                                            Continue with Google
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         ) : (
                             <div className="relative shadow-lg rounded-md overflow-hidden" ref={pdfViewerRef} onContextMenu={handleContextMenu} onMouseUp={handleMouseUp}>
