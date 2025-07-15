@@ -110,7 +110,7 @@ interface PDFPageProxy {
 
 
 // --- Firebase Configuration ---
-const firebaseConfig = process.env.REACT_APP_FIREBASE_CONFIG
+const firebaseConfig = process.env.REACT_APP_FIREBASE_CONFIG ? JSON.parse(process.env.REACT_APP_FIREBASE_CONFIG) : {};
 const appId =   'default-codex-app';
 const initialAuthToken =   null;
 
@@ -511,7 +511,7 @@ export default function App(): JSX.Element {
 
     // --- Firebase Initialization and Auth ---
     useEffect(() => {
-        if (Object.keys(firebaseConfig).length > 0) {
+        if (firebaseConfig && typeof firebaseConfig === 'object' && Object.keys(firebaseConfig).length > 0) {
             try {
                 const app: FirebaseApp = initializeApp(firebaseConfig);
                 const authInstance: Auth = getAuth(app);
@@ -598,10 +598,10 @@ export default function App(): JSX.Element {
             };
 
             window.addEventListener('beforeunload', saveTimeOnUnload);
-
+            saveTimeOnUnload(); // Also call on component unmount
+            
             return () => {
                 window.removeEventListener('beforeunload', saveTimeOnUnload);
-                saveTimeOnUnload(); // Also call on component unmount
             };
         };
     }, [db, userId, appId, pdfDoc]); // Re-run when db, userId, or pdfDoc changes
@@ -909,7 +909,7 @@ export default function App(): JSX.Element {
         }
         try {
             const mistakesCol = collection(db, `artifacts/${appId}/users/${userId}/documents/${pdfFile.name}/mistakes`);
-            if (mistake.id) {
+            if ('id' in mistake && mistake.id) {
                 const mistakeRef = doc(db, `artifacts/${appId}/users/${userId}/documents/${pdfFile.name}/mistakes`, mistake.id);
                 await setDoc(mistakeRef, mistake, { merge: true });
                 setNotification({ message: "Mistake updated successfully!", type: "success", id: Date.now() });
@@ -1414,7 +1414,7 @@ export default function App(): JSX.Element {
         }
         promptForLLM += ` Text: "${textToProcess}"`;
 
-        const apiUrl = `${pollinaionsBaseUrl}${encodeURIComponent(promptForLLM)}?model=${aiModel}&json=true`;
+        const apiUrl = `https://text.pollinations.ai/${encodeURIComponent(promptForLLM)}?model=${aiModel}&json=true`;
 
         setAiResponse(prev => ({
             ...prev,
@@ -1568,7 +1568,7 @@ export default function App(): JSX.Element {
             setNotification({ message: "Signed in with Google successfully!", type: "success", id: Date.now() });
         } catch (error) {
             console.error("Google Sign-In failed:", error);
-            setNotification({ message: `Google Sign-In failed: ${error.message}`, type: "error", id: Date.now() });
+            setNotification({ message: `Google Sign-In failed: ${error instanceof Error ? error.message : 'Unknown error'}`, type: "error", id: Date.now() });
         }
     };
 
@@ -1610,7 +1610,7 @@ export default function App(): JSX.Element {
             setNotification({ message: "Signed out successfully!", type: "success", id: Date.now() });
         } catch (error) {
             console.error("Sign out failed:", error);
-            setNotification({ message: `Sign out failed: ${error.message}`, type: "error", id: Date.now() });
+            setNotification({ message: `Sign out failed: ${error instanceof Error ? error.message : 'Unknown error'}`, type: "error", id: Date.now() });
         }
     };
 
@@ -1795,7 +1795,7 @@ export default function App(): JSX.Element {
                     {isSidebarExpanded ? (
                         <h2 className="text-base font-semibold text-gray-800 whitespace-nowrap">Codex Interactive</h2>
                     ) : (
-                        <Menu size={iconSize} className="text-gray-600 cursor-pointer" onClick={() => setIsSidebarExpanded(!isSidebarExpanded)} title="Expand Menu" />
+                        <Menu size={iconSize} className="text-gray-600 cursor-pointer" onClick={() => setIsSidebarExpanded(!isSidebarExpanded)} />
                     )}
                 </div>
 
@@ -2178,10 +2178,10 @@ export default function App(): JSX.Element {
                                     onClick={() => setCurrentQuestionIndex(idx)}
                                     className={`w-6 h-6 rounded-full text-xs font-semibold flex items-center justify-center
                                         ${currentQuestionIndex === idx ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}
-                                        ${userAnswers[q.no] !== undefined && userAnswers[parseInt(q.no)] !== null ? 'border-2 border-green-500' : ''}
+                                        ${userAnswers[q.no] !== undefined && userAnswers[q.no] !== null ? 'border-2 border-green-500' : ''}
                                         ${markedForReview.has(q.no) ? 'border-2 border-orange-500' : ''}
                                     `}
-                                    title={`Question ${q.no} ${userAnswers[parseInt(q.no)] !== undefined && userAnswers[parseInt(q.no)] !== null ? '(Attempted)' : ''} ${markedForReview.has(q.no) ? '(Marked)' : ''}`}
+                                    title={`Question ${q.no} ${userAnswers[q.no] !== undefined && userAnswers[q.no] !== null ? '(Attempted)' : ''} ${markedForReview.has(q.no) ? '(Marked)' : ''}`}
                                 >
                                     {q.no}
                                 </button>
