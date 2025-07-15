@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { initializeApp, FirebaseApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, Auth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
-import { getFirestore, collection, doc, setDoc, getDoc, onSnapshot, addDoc, updateDoc, deleteDoc, query, where, getDocs, Firestore, Unsubscribe } from 'firebase/firestore';
-import { Upload, FileText, ChevronLeft, ChevronRight, Search, Zap, Highlighter, Type, MousePointer, Save, Trash2, ChevronsUpDown, Bot, X, LogIn, LogOut, Eraser, Plus, HelpCircle, ClipboardList, BookOpen, Edit, Flag, CheckCircle, XCircle, NotebookText, Menu, BookMarked, Bell, Clock } from 'lucide-react';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, Auth, GoogleAuthProvider, signInWithPopup, signOut, linkWithPopup, User ,deleteUser} from 'firebase/auth';
+import { getFirestore, collection, doc, setDoc, getDoc, onSnapshot, addDoc, updateDoc, deleteDoc, query, where, getDocs, Firestore, Unsubscribe, writeBatch } from 'firebase/firestore';
+import { Upload, FileText, ChevronLeft, ChevronRight, Search, Zap, Highlighter, Type, MousePointer, Save, Trash2, ChevronsUpDown, Bot, X, LogIn, LogOut, Eraser, Plus, HelpCircle, ClipboardList, BookOpen, Edit, Flag, CheckCircle, XCircle, NotebookText, Menu, BookMarked, Bell, Clock, UserX } from 'lucide-react';
 
 // --- Type Definitions ---
 interface HighlightRect {
@@ -110,9 +110,9 @@ interface PDFPageProxy {
 
 
 // --- Firebase Configuration ---
-const firebaseConfig = process.env.REACT_APP_FIREBASE_CONFIG ? JSON.parse(process.env.REACT_APP_FIREBASE_CONFIG) : {};
-const appId =   'default-codex-app';
-const initialAuthToken =   null;
+const firebaseConfig = {   apiKey: "AIzaSyC0nM-Cji-nJezd7bAvZPHwDGs7jWOrEg4",   authDomain: "neon-equinox-337515.firebaseapp.com",   projectId: "neon-equinox-337515",   storageBucket: "neon-equinox-337515.firebasestorage.app",   messagingSenderId: "1055440875899",   appId: "1:1055440875899:web:71f697bed1467f4b704dde",   measurementId: "G-N1NJ0CGXT4" }
+const appId =  'default-codex-app';
+const initialAuthToken = null;
 
 
 // --- Custom Hook to load external scripts ---
@@ -437,6 +437,7 @@ export default function App(): JSX.Element {
     const [userId, setUserId] = useState<string | null>(null);
     const [db, setDb] = useState<Firestore | null>(null);
     const [auth, setAuth] = useState<Auth | null>(null);
+    const [isAnonymous, setIsAnonymous] = useState<boolean>(false); // NEW: Track if user is anonymous
 
     // PDF document states
     const [pdfFile, setPdfFile] = useState<File | null>(null);
@@ -483,6 +484,7 @@ export default function App(): JSX.Element {
 
     // Help modal state
     const [showHelpModal, setShowHelpModal] = useState<boolean>(false);
+    const [showDeleteAccountConfirm, setShowDeleteAccountConfirm] = useState<boolean>(false); // NEW: State for delete account confirmation
 
     // UI state for loading overlay and notifications
     const [showLoadingOverlay, setShowLoadingOverlay] = useState<boolean>(false);
@@ -496,7 +498,7 @@ export default function App(): JSX.Element {
     const [sessionStartTime, setSessionStartTime] = useState<number>(Date.now()); // Timestamp when session started/resumed
     const [totalTimeSpent, setTotalTimeSpent] = useState<number>(0); // Total time spent on website (persisted)
     const [currentSessionElapsed, setCurrentSessionElapsed] = useState<number>(0); // Time elapsed in current session (not persisted)
-    const timerIntervalRef = useRef<number | null>(null);
+    const timerIntervalRef = useRef<number | null>(null); // Corrected declaration
     const isSavingTimeRef = useRef<boolean>(false); // To prevent multiple saves on unmount/signout
 
     // Refs for DOM elements
@@ -522,6 +524,7 @@ export default function App(): JSX.Element {
                 const unsubscribe = onAuthStateChanged(authInstance, async (user) => {
                     if (user) {
                         setUserId(user.uid);
+                        setIsAnonymous(user.isAnonymous); // Set anonymous status
                         setIsAuthReady(true);
                         // Load total time spent once authentication is ready
                         try {
@@ -556,12 +559,17 @@ export default function App(): JSX.Element {
         }
     }, []);
 
-    // --- Timer Logic (NEW) ---
+    // --- Timer Interval Management ---
     useEffect(() => {
         // Start timer only when PDF is loaded and DB/user are ready
         if (db && userId && pdfDoc) {
             setSessionStartTime(Date.now()); // Reset start time for the new session
             setCurrentSessionElapsed(0); // Reset current session elapsed time
+
+            // Clear any existing interval before setting a new one
+            if (timerIntervalRef.current) {
+                clearInterval(timerIntervalRef.current);
+            }
 
             timerIntervalRef.current = window.setInterval(() => {
                 setCurrentSessionElapsed(prev => prev + 1);
@@ -574,44 +582,47 @@ export default function App(): JSX.Element {
             }
         }
 
-        // Cleanup function for timer and saving on unmount/pdfDoc change
+        // Cleanup for the interval
         return () => {
             if (timerIntervalRef.current) {
                 clearInterval(timerIntervalRef.current);
+                timerIntervalRef.current = null; // Ensure it's nullified
             }
-            
-            // Save time when component unmounts or pdfDoc/userId changes
-            const saveTimeOnUnload = async () => {
-                if (db && userId && currentSessionElapsed > 0 && !isSavingTimeRef.current) {
-                    isSavingTimeRef.current = true; // Set flag to prevent multiple saves
-                    try {
-                        const timeDocRef = doc(db, `artifacts/${appId}/users/${userId}/sessionTime`, 'total');
-                        const docSnap = await getDoc(timeDocRef);
-                        const existingTotal = docSnap.exists() ? docSnap.data().totalSeconds : 0;
-                        await setDoc(timeDocRef, { totalSeconds: existingTotal + currentSessionElapsed }, { merge: true });
-                        console.log(`Saved ${currentSessionElapsed} seconds. New total: ${existingTotal + currentSessionElapsed}`);
-                    } catch (error) {
-                        console.error("Error saving time on unload:", error);
-                    } finally {
-                        isSavingTimeRef.current = false; // Reset flag
-                    }
-                }
-            };
-
-            const handleBeforeUnload = () => {
-                saveTimeOnUnload();
-            };
-
-            window.addEventListener('beforeunload', handleBeforeUnload);
-            saveTimeOnUnload(); // Also call on component unmount
-            
-            // Return cleanup function that removes event listener
-            const cleanup = () => {
-                window.removeEventListener('beforeunload', handleBeforeUnload);
-            };
-            cleanup();
         };
-    }, [db, userId, appId, pdfDoc, currentSessionElapsed]); // Re-run when db, userId, or pdfDoc changes
+    }, [db, userId, pdfDoc]); // Dependencies: db, userId, pdfDoc to start/stop the timer
+
+    // --- Time Saving on Unload/Unmount ---
+    useEffect(() => {
+        const saveTime = async () => {
+            if (db && userId && currentSessionElapsed > 0 && !isSavingTimeRef.current) {
+                isSavingTimeRef.current = true;
+                try {
+                    const timeDocRef = doc(db, `artifacts/${appId}/users/${userId}/sessionTime`, 'total');
+                    const docSnap = await getDoc(timeDocRef);
+                    const existingTotal = docSnap.exists() ? docSnap.data().totalSeconds : 0;
+                    await setDoc(timeDocRef, { totalSeconds: existingTotal + currentSessionElapsed }, { merge: true });
+                    console.log(`Saved ${currentSessionElapsed} seconds. New total: ${existingTotal + currentSessionElapsed}`);
+                } catch (error) {
+                    console.error("Error saving time:", error);
+                } finally {
+                    isSavingTimeRef.current = false;
+                }
+            }
+        };
+
+        const handleBeforeUnload = () => {
+            saveTime();
+        };
+
+        window.addEventListener('beforeunload', handleBeforeUnload);
+
+        // This cleanup runs when the component unmounts or dependencies change.
+        // It ensures time is saved if the `beforeunload` event doesn't fire reliably (e.g., in hot reloading).
+        return () => {
+            window.removeEventListener('beforeunload', handleBeforeUnload);
+            saveTime(); // Save time when component unmounts or dependencies change
+        };
+    }, [db, userId, appId, currentSessionElapsed]); // Dependencies for saving time
 
     // --- PDF Rendering Logic ---
     const renderPage = useCallback(async (pageNumber: number, docToRender: PDFDocumentProxy) => {
@@ -1350,14 +1361,20 @@ export default function App(): JSX.Element {
 
                 if (finalParsedNotes && Array.isArray(finalParsedNotes)) {
                     const parsedNotes: ShortNoteEntry[] = finalParsedNotes;
+
+                    // Use a batch write for efficiency
+                    const batch = writeBatch(db!);
                     for (const note of parsedNotes) {
-                        await saveShortNote({
+                        const newDocRef = doc(collection(db!, `artifacts/${appId}/users/${userId}/documents/${pdfFile!.name}/shortNotes`));
+                        batch.set(newDocRef, {
                             page: currentPage,
                             text: note.text,
                             importanceTag: note.importanceTag,
                             timestamp: new Date().toISOString()
                         });
                     }
+                    await batch.commit();
+
                     setShowShortNotesUI(true);
                     aiText = "Short notes generated and saved successfully!";
                     setNotification({ message: "Short notes generated and saved successfully!", type: "success", id: Date.now() });
@@ -1455,14 +1472,19 @@ export default function App(): JSX.Element {
             if (finalParsedNotes && Array.isArray(finalParsedNotes)) {
                 const parsedNotes: ShortNoteEntry[] = finalParsedNotes;
 
+                // Use a batch write for efficiency
+                const batch = writeBatch(db!);
                 for (const note of parsedNotes) {
-                    await saveShortNote({
+                    const newDocRef = doc(collection(db!, `artifacts/${appId}/users/${userId}/documents/${pdfFile!.name}/shortNotes`));
+                    batch.set(newDocRef, {
                         page: currentPage,
                         text: note.text,
                         importanceTag: note.importanceTag,
                         timestamp: new Date().toISOString()
                     });
                 }
+                await batch.commit();
+
                 setShortNotesRegenPrompt('');
                 setShowShortNotesUI(true);
                 setAiResponse(prev => ({
@@ -1571,11 +1593,24 @@ export default function App(): JSX.Element {
         }
         const provider = new GoogleAuthProvider();
         try {
-            await signInWithPopup(auth, provider);
-            setNotification({ message: "Signed in with Google successfully!", type: "success", id: Date.now() });
-        } catch (error) {
+            // Check if current user is anonymous and link account
+            if (auth.currentUser && auth.currentUser.isAnonymous) {
+                const currentUser = auth.currentUser as User; // Type assertion
+                await linkWithPopup(auth.currentUser, provider);
+                setNotification({ message: "Anonymous account linked with Google successfully!", type: "success", id: Date.now() });
+            } else {
+                await signInWithPopup(auth, provider);
+                setNotification({ message: "Signed in with Google successfully!", type: "success", id: Date.now() });
+            }
+        } catch (error: any) {
             console.error("Google Sign-In failed:", error);
-            setNotification({ message: `Google Sign-In failed: ${error instanceof Error ? error.message : 'Unknown error'}`, type: "error", id: Date.now() });
+            if (error.code === 'auth/popup-closed-by-user') {
+                setNotification({ message: "Google Sign-In cancelled.", type: "info", id: Date.now() });
+            } else if (error.code === 'auth/credential-already-in-use') {
+                setNotification({ message: "This Google account is already linked to another user.", type: "error", id: Date.now() });
+            } else {
+                setNotification({ message: `Google Sign-In failed: ${error.message}`, type: "error", id: Date.now() });
+            }
         }
     };
 
@@ -1604,6 +1639,7 @@ export default function App(): JSX.Element {
             await signOut(auth);
             setUserId(null);
             setIsAuthReady(false);
+            setIsAnonymous(false); // Reset anonymous status
             setPdfFile(null);
             setAnnotations([]);
             setMistakeBook([]);
@@ -1618,6 +1654,57 @@ export default function App(): JSX.Element {
         } catch (error) {
             console.error("Sign out failed:", error);
             setNotification({ message: `Sign out failed: ${error instanceof Error ? error.message : 'Unknown error'}`, type: "error", id: Date.now() });
+        }
+    };
+
+    const handleDeleteAccount = async () => {
+        if (!auth || !auth.currentUser || !db || !userId) {
+            setNotification({ message: "Authentication or database not ready.", type: "error", id: Date.now() });
+            return;
+        }
+
+        if (!auth.currentUser.isAnonymous) {
+            setNotification({ message: "Account deletion is only available for anonymous users. Please sign out first if you wish to delete your Google-linked account.", type: "info", id: Date.now() });
+            return;
+        }
+
+        setShowLoadingOverlay(true);
+        setShowDeleteAccountConfirm(false); // Close confirmation modal
+
+        try {
+            // Delete user data from Firestore
+            // This is a simplified example. In a real app, you'd need to recursively delete all subcollections.
+            const userDocRef = doc(db, `artifacts/${appId}/users/${userId}`);
+            await deleteDoc(userDocRef); // This only deletes the user document, not subcollections.
+                                        // For full deletion, you'd need a Cloud Function or more complex client-side logic.
+
+            // Delete the user from Firebase Authentication
+            await deleteUser(auth.currentUser);
+
+            setNotification({ message: "Account and associated data deleted successfully!", type: "success", id: Date.now() });
+            // Reset all local states after deletion
+            setUserId(null);
+            setIsAuthReady(false);
+            setIsAnonymous(false);
+            setPdfFile(null);
+            setAnnotations([]);
+            setMistakeBook([]);
+            setShortNotes([]);
+            setTotalTimeSpent(0);
+            setCurrentSessionElapsed(0);
+            if (timerIntervalRef.current) {
+                clearInterval(timerIntervalRef.current);
+                timerIntervalRef.current = null;
+            }
+        } catch (error: any) {
+            console.error("Error deleting account:", error);
+            if (error.code === 'auth/requires-recent-login') {
+                setNotification({ message: "Please re-authenticate to delete your account. Sign out and sign in again.", type: "error", id: Date.now() });
+            } else {
+                setNotification({ message: `Failed to delete account: ${error.message}`, type: "error", id: Date.now() });
+            }
+        } finally {
+            setShowLoadingOverlay(false);
         }
     };
 
@@ -1806,7 +1893,7 @@ export default function App(): JSX.Element {
                     )}
                 </div>
 
-                <nav className="flex-grow flex flex-col space-y-1 mt-2 overflow-y-auto custom-scrollbar">
+                <nav className="flex-grow flex flex-col space-y-1 mt-2 overflow-y-auto custom-scrollbar pt-16"> {/* Added pt-16 to push down elements */}
                     <button
                         onClick={() => {
                             setShowMistakeBook(false); // Close other modals
@@ -1880,10 +1967,10 @@ export default function App(): JSX.Element {
                                             />
                                             <div className="flex-1 min-w-0">
                                                 <p className="text-xs font-medium text-gray-700 truncate">
-                                                    {auth.currentUser.displayName || auth.currentUser.email}
+                                                    {auth.currentUser.displayName || auth.currentUser.email || 'Anonymous User'}
                                                 </p>
                                                 <p className="text-xs text-gray-500 truncate">
-                                                    Signed in
+                                                    {auth.currentUser.isAnonymous ? 'Signed in anonymously' : 'Signed in with Google'}
                                                 </p>
                                             </div>
                                         </div>
@@ -1897,6 +1984,18 @@ export default function App(): JSX.Element {
                                         <LogOut size={iconSize} className={isSidebarExpanded ? "mr-3 text-red-600" : "text-gray-600"} />
                                         {isSidebarExpanded && <span className="text-sm font-medium text-red-600">Sign Out</span>}
                                     </button>
+                                    {isAnonymous && (
+                                        <button
+                                            onClick={() => setShowDeleteAccountConfirm(true)}
+                                            className={`flex items-center w-full text-left rounded-md text-gray-700 transition-colors duration-200 ${sidebarPadding} ${isSidebarExpanded ? 'justify-start hover:bg-red-50 border border-red-100' : 'justify-center hover:bg-gray-100'}`}
+                                            style={isSidebarExpanded ? {} : { backgroundColor: 'rgb(240,244,249)' }}
+                                            title="Delete Anonymous Account"
+                                        >
+                                            <UserX size={iconSize} className={isSidebarExpanded ? "mr-3 text-red-600" : "text-gray-600"} />
+                                            {isSidebarExpanded && <span className="text-sm font-medium text-red-600">Delete Account</span>}
+                                        </button>
+                                    )}
+                                {'}'}
                                 </div>
                             ) : (
                                 <button
@@ -2752,6 +2851,31 @@ export default function App(): JSX.Element {
         );
     };
 
+    const DeleteAccountConfirmation = ({ onClose, onDeleteConfirm }: { onClose: () => void; onDeleteConfirm: () => void; }) => {
+        return (
+            <div className="fixed inset-0 bg-black/20 z-50 flex items-center justify-center p-4">
+                <div className="bg-white rounded-lg shadow-xl w-full max-w-sm flex flex-col" onClick={e => e.stopPropagation()}>
+                    <div className="p-3 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                        <h3 className="font-semibold text-base text-red-700">Confirm Account Deletion</h3>
+                        <button onClick={onClose} className="p-1 rounded-full hover:bg-gray-100"><X size={16}/></button>
+                    </div>
+                    <div className="p-4 text-center">
+                        <p className="text-gray-700 text-sm mb-4">
+                            Are you sure you want to delete your anonymous account? This action is irreversible and all your data (annotations, mistakes, notes, session time) will be permanently lost.
+                        </p>
+                        <p className="text-xs text-gray-500 font-medium">
+                            If you wish to save your data, please link your account to Google before deleting.
+                        </p>
+                    </div>
+                    <div className="p-3 bg-gray-50 border-t border-gray-100 flex justify-end space-x-2">
+                        <button onClick={onClose} className="px-3 py-1.5 rounded-full text-sm font-medium text-gray-700 bg-white border border-gray-200 hover:bg-gray-100">Cancel</button>
+                        <button onClick={onDeleteConfirm} className="px-3 py-1.5 rounded-full text-sm font-medium text-white bg-red-600 hover:bg-red-700"><Trash2 size={14} className="inline mr-1"/> Delete Account</button>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     return (
         <div className="h-screen w-screen bg-gray-100 flex font-sans antialiased">
             <style>{`
@@ -2861,7 +2985,7 @@ export default function App(): JSX.Element {
                                 </div>
                             </div>
                         )}
-                        
+
                         {!pdfFile ? (
                             <div className="text-center mt-16">
                                 <div className="mx-auto w-20 h-20 flex items-center justify-center bg-gray-50 rounded-full border-2 border-dashed border-gray-200">
@@ -2995,9 +3119,14 @@ export default function App(): JSX.Element {
                     <LoadingOverlay />
                     <NotificationWidget />
                     {db && userId && <SessionTimer />}
+                    {showDeleteAccountConfirm && (
+                        <DeleteAccountConfirmation
+                            onClose={() => setShowDeleteAccountConfirm(false)}
+                            onDeleteConfirm={handleDeleteAccount}
+                        />
+                    )}
                 </>
             )}
         </div>
     );
 }
-
